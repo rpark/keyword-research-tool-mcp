@@ -1,0 +1,39 @@
+name: seo-keyword-research
+version: 1.0.0
+description: SEO keyword research and analysis tool using Firecrawl, Perplexity, and DataForSEO APIs
+
+tools:
+  - name: analyze-website
+    description: |
+      Complete SEO keyword analysis for a website. Scrapes website content, 
+      generates seed keywords using AI, gets search volume and competition data, 
+      clusters keywords, and generates a comprehensive SEO report.
+      
+      API keys can be provided as parameters or set as environment variables:
+      - FIRECRAWL_API_KEY
+      - PERPLEXITY_API_KEY  
+      - DATAFORSEO_USERNAME
+      - DATAFORSEO_PASSWORD
+    parameters:
+      type: object
+      properties:
+        websiteUrl:
+          type: string
+          description: The website URL to analyze (e.g., https://example.com)
+        businessType:
+          type: string
+          enum: ["E-commerce", "SaaS", "Service Business", "Blog/Content", "Education"]
+          description: The type of business for targeted keyword generation
+        firecrawlApiKey:
+          type: string
+          description: Firecrawl API key (optional - will use FIRECRAWL_API_KEY env var if not provided)
+        perplexityApiKey:
+          type: string
+          description: Perplexity API key (optional - will use PERPLEXITY_API_KEY env var if not provided)
+        dataforSeoUsername:
+          type: string
+          description: DataForSEO username (optional - will use DATAFORSEO_USERNAME env var if not provided)
+        dataforSeoPassword:
+          type: string
+          description: DataForSEO password (optional - will use DATAFORSEO_PASSWORD env var if not provided)
+      required: [websiteUrl, businessType] 

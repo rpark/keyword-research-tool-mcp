@@ -1,0 +1,26 @@
+{
+  "name": "seo-keyword-research-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for SEO keyword research and analysis",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "keywords": ["seo", "keyword-research", "mcp", "firecrawl", "perplexity", "dataforseo"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+} 
