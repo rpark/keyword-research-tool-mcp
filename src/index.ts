@@ -69,13 +69,38 @@ function getApiCredentials(args: any) {
   const perplexityApiKey = args.perplexityApiKey || process.env.PERPLEXITY_API_KEY;
   const dataforSeoUsername = args.dataforSeoUsername || process.env.DATAFORSEO_USERNAME;
   const dataforSeoPassword = args.dataforSeoPassword || process.env.DATAFORSEO_PASSWORD;
-
+  
+  const debugInfo = {
+    firecrawl: firecrawlApiKey ? 'PROVIDED' : 'MISSING',
+    perplexity: perplexityApiKey ? 'PROVIDED' : 'MISSING',
+    dataforSeoUsername: dataforSeoUsername ? `${dataforSeoUsername.substring(0, 3)}***` : 'MISSING',
+    dataforSeoPassword: dataforSeoPassword ? '***PROVIDED***' : 'MISSING',
+    envVars: Object.keys(process.env).filter(k => k.includes('DATAFORSEO') || k.includes('FIRECRAWL') || k.includes('PERPLEXITY'))
+  };
+  
+  console.error(`[DEBUG] API Credentials Check: ${JSON.stringify(debugInfo)}`);
+  
   return {
     firecrawlApiKey,
     perplexityApiKey,
     dataforSeoUsername,
-    dataforSeoPassword
+    dataforSeoPassword,
+    debugInfo
   };
+}
+
+// Helper function to convert DataForSEO competition strings to numeric values
+function convertCompetitionToNumeric(competition: any): number {
+  if (typeof competition === 'number') return competition;
+  if (typeof competition === 'string') {
+    switch (competition.toUpperCase()) {
+      case 'LOW': return 0.2;
+      case 'MEDIUM': return 0.5;
+      case 'HIGH': return 0.8;
+      default: return 0.3;
+    }
+  }
+  return 0.3; // default fallback
 }
 
 // API Functions
@@ -121,7 +146,10 @@ async function generateKeywords(url: string, websiteData: any, businessType: str
   const description = websiteData.metadata?.description || 'N/A';
   const content = cleanWebsiteContent(websiteData.markdown || '', businessType).substring(0, 1500);
 
-  const prompt = `Analyze this ${businessType} website and generate 50 diverse seed keywords covering different aspects of the business:
+  console.error(`[KEYWORDS] Starting expanded keyword generation for ${businessType} business`);
+
+  // First round: Core business keywords
+  const corePrompt = `Analyze this ${businessType} website and generate 100 diverse seed keywords covering different aspects of the business:
 
 Website: ${url}
 Business Type: ${businessType}
@@ -129,10 +157,51 @@ Title: ${title}
 Description: ${description}
 Content: ${content}
 
-Generate 50 DIVERSE seed keywords covering the full customer journey. Include awareness, consideration, and decision stage keywords. Mix broad and specific terms.
+Generate 100 DIVERSE seed keywords covering the full customer journey:
+- Product/service keywords (20)
+- Industry keywords (15) 
+- Problem-solving keywords (15)
+- Comparison keywords (10)
+- Educational keywords (10)
+- Location-based keywords (10)
+- Brand keywords (10)
+- Technical keywords (10)
+
+Include awareness, consideration, and decision stage keywords. Mix broad and specific terms.
 
 Return ONLY a JSON array of keyword strings, no explanations:`;
 
+  console.error(`[KEYWORDS] Round 1: Generating core business keywords`);
+  const coreKeywords = await callPerplexityForKeywords(corePrompt, apiKey, businessType);
+  
+  // Second round: Expand with related and long-tail keywords
+  const expansionPrompt = `Based on this ${businessType} business analysis, generate 50 additional related and long-tail keywords:
+
+Website: ${url}
+Business Type: ${businessType}  
+Core Keywords Found: ${coreKeywords.slice(0, 10).join(', ')}...
+
+Generate 50 ADDITIONAL keywords focusing on:
+- Long-tail variations of core terms (15)
+- Question-based keywords (10)
+- Competitor comparison terms (10)
+- Feature-specific keywords (10)
+- Use case keywords (5)
+
+Return ONLY a JSON array of keyword strings, no explanations:`;
+
+  console.error(`[KEYWORDS] Round 2: Generating expansion keywords`);
+  const expansionKeywords = await callPerplexityForKeywords(expansionPrompt, apiKey, businessType);
+
+  // Combine and deduplicate
+  const allKeywords = [...new Set([...coreKeywords, ...expansionKeywords])];
+  console.error(`[KEYWORDS] Combined total: ${allKeywords.length} unique keywords`);
+  
+  return filterTechnicalKeywords(allKeywords).slice(0, 100); // Increased from 40 to 100
+}
+
+// Helper function for Perplexity API calls
+async function callPerplexityForKeywords(prompt: string, apiKey: string, businessType: string): Promise<string[]> {
   const response = await fetch('https://api.perplexity.ai/chat/completions', {
     method: 'POST',
     headers: {
@@ -145,8 +214,8 @@ Return ONLY a JSON array of keyword strings, no explanations:`;
         { role: 'system', content: `You are an expert SEO strategist specializing in ${businessType} businesses.` },
         { role: 'user', content: prompt }
       ],
-      max_tokens: 800,
-      temperature: 0.2
+      max_tokens: 1200, // Increased for more keywords
+      temperature: 0.3
     })
   });
 
@@ -167,31 +236,34 @@ Return ONLY a JSON array of keyword strings, no explanations:`;
     keywords = lines
       .map((line: string) => line.replace(/^[\d\-\*\.\s\[\]"'`]+/, '').replace(/["'\]\[`]/g, '').trim())
       .filter((kw: string) => kw.length > 3 && kw.length < 100)
-      .slice(0, 50);
+      .slice(0, 100); // Increased limit
   }
 
-  return filterTechnicalKeywords(keywords).slice(0, 40);
+  console.error(`[KEYWORDS] Perplexity returned ${keywords.length} keywords`);
+  return keywords;
 }
 
 async function getKeywordMetrics(keywords: string[], username: string, password: string) {
   if (!username || !password) {
-    // throw new Error('DataForSEO credentials are required. Set DATAFORSEO_USERNAME and DATAFORSEO_PASSWORD environment variables')
-    console.warn('DataForSEO credentials not provided. Using mock data for keyword metrics.');
-    // Return mock data structure
-    return {
-      tasks: [{
-        result: keywords.map(keyword => ({
-          keyword,
-          search_volume: Math.floor(Math.random() * 10000) + 100,
-          cpc: Math.round((Math.random() * 5 + 0.1) * 100) / 100,
-          competition: Math.round(Math.random() * 100) / 100,
-          competition_level: ['LOW', 'MEDIUM', 'HIGH'][Math.floor(Math.random() * 3)]
-        }))
-      }]
-    };
+    throw new Error('DataForSEO credentials are required for keyword metrics. Set DATAFORSEO_USERNAME and DATAFORSEO_PASSWORD environment variables or pass dataforSeoUsername and dataforSeoPassword parameters.');
   }
 
+  console.error(`[DEBUG] DataForSEO Keywords API - Username: ${username ? `${username.substring(0, 3)}***` : 'MISSING'}`);
+  console.error(`[DEBUG] DataForSEO Keywords API - Password: ${password ? '***PROVIDED***' : 'MISSING'}`);
+  console.error(`[DEBUG] DataForSEO Keywords API - Keywords to analyze: ${keywords.length}`);
+  console.error(`[DEBUG] DataForSEO Keywords API - Keywords: ${JSON.stringify(keywords.slice(0, 5))}${keywords.length > 5 ? '...' : ''}`);
+
   const credentials = btoa(`${username}:${password}`);
+  
+  const requestBody = [{
+    keywords: keywords,
+    location_code: 2840, // United States
+    language_code: 'en',
+    include_serp_info: true,
+    include_clickstream_data: true
+  }];
+  
+  console.error(`[DEBUG] DataForSEO Keywords API - Request body: ${JSON.stringify(requestBody, null, 2)}`);
   
   const response = await fetch('https://api.dataforseo.com/v3/keywords_data/google_ads/search_volume/live', {
     method: 'POST',
@@ -199,72 +271,123 @@ async function getKeywordMetrics(keywords: string[], username: string, password:
       'Authorization': `Basic ${credentials}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify([{
-      keywords: keywords,
-      location_code: 2840, // United States
-      language_code: 'en',
-      include_serp_info: true,
-      include_clickstream_data: true
-    }])
+    body: JSON.stringify(requestBody)
   });
 
+  console.error(`[DEBUG] DataForSEO Keywords API - Response status: ${response.status} ${response.statusText}`);
+  console.error(`[DEBUG] DataForSEO Keywords API - Response headers: ${JSON.stringify(Object.fromEntries(response.headers.entries()))}`);
+
   if (!response.ok) {
-    throw new Error(`DataForSEO keyword metrics error: ${response.status} ${response.statusText}`);
+    const errorText = await response.text();
+    console.error(`[DEBUG] DataForSEO Keywords API - Error response: ${errorText}`);
+    throw new Error(`DataForSEO keyword metrics error: ${response.status} ${response.statusText} - ${errorText}`);
   }
 
-  return await response.json();
+  const result = await response.json();
+  console.error(`[DEBUG] DataForSEO Keywords API - Response received, tasks: ${result.tasks?.length || 0}`);
+  console.error(`[DEBUG] DataForSEO Keywords API - First task status: ${result.tasks?.[0]?.status_message || 'N/A'}`);
+  console.error(`[DEBUG] DataForSEO Keywords API - Results count: ${result.tasks?.[0]?.result?.length || 0}`);
+  
+  if (result.tasks?.[0]?.result?.length > 0) {
+    console.error(`[DEBUG] DataForSEO Keywords API - Sample result: ${JSON.stringify(result.tasks[0].result[0], null, 2)}`);
+  }
+
+  return result;
 }
 
-async function getSerpData(keywords: string[], username: string, password: string) {
-  if (!username || !password) {
-    // throw new Error('DataForSEO credentials are required. Set DATAFORSEO_USERNAME and DATAFORSEO_PASSWORD environment variables or pass as parameters.');
-    console.warn('DataForSEO credentials not provided. Using mock SERP data.');
-    // Return mock SERP data
-    const mockDomains = ['example.com', 'competitor1.com', 'competitor2.com', 'leader.com'];
-    return {
-      tasks: keywords.slice(0, 10).map(keyword => ({
-        result: [{
-          items: mockDomains.map((domain, i) => ({
-            title: `${keyword} - Best ${keyword} Solution`,
-            url: `https://${domain}`,
-            domain: domain,
-            position: i + 1
-          }))
-        }]
-      }))
-    };
+// Get SERP data for keywords
+async function getSerpData(keywords: string[], credentials: any): Promise<any> {
+  if (!credentials.dataforSeoUsername || !credentials.dataforSeoPassword) {
+    console.error('[SERP] Missing DataForSEO credentials');
+    return { tasks: [] };
   }
 
-  const credentials = btoa(`${username}:${password}`);
-  
-  const serpRequests = keywords.slice(0, 15).map(keyword => ({
-    keyword: keyword,
-    location_code: 2840,
-    language_code: 'en',
-    device: 'desktop',
-    depth: 5
-  }));
-  
-  const response = await fetch('https://api.dataforseo.com/v3/serp/google/organic/live/advanced', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Basic ${credentials}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(serpRequests)
-  });
+  console.error(`[SERP] Starting SERP data collection for ${keywords.length} keywords`);
+  const auth = Buffer.from(`${credentials.dataforSeoUsername}:${credentials.dataforSeoPassword}`).toString('base64');
+  const serpResults: any[] = [];
 
-  if (!response.ok) {
-    throw new Error(`DataForSEO SERP error: ${response.status} ${response.statusText}`);
+  // DataForSEO Live SERP API accepts only ONE keyword per request
+  // So we need to make individual calls for each keyword
+  for (const keyword of keywords.slice(0, 50)) {
+    try {
+      console.error(`[SERP] Making API call for keyword: "${keyword}"`);
+      
+      const requestBody = [{
+        keyword: keyword,
+        location_code: 2840,
+        language_code: 'en',
+        device: 'desktop',
+        depth: 5
+      }];
+
+      console.error(`[SERP] Request body for "${keyword}":`, JSON.stringify(requestBody));
+
+      const response = await fetch('https://api.dataforseo.com/v3/serp/google/organic/live/advanced', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${auth}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) {
+        console.error(`[SERP] API call failed for "${keyword}": ${response.status} ${response.statusText}`);
+        continue;
+      }
+
+      const data = await response.json();
+      console.error(`[SERP] API response for "${keyword}":`, {
+        status_code: data.status_code,
+        tasks_count: data.tasks_count,
+        tasks_error: data.tasks_error,
+        has_tasks: !!data.tasks,
+        tasks_length: data.tasks?.length || 0
+      });
+
+      if (data.status_code === 20000 && data.tasks && data.tasks.length > 0) {
+        serpResults.push(data.tasks[0]); // Add the single task result
+        console.error(`[SERP] Successfully processed "${keyword}"`);
+      } else {
+        console.error(`[SERP] No valid results for "${keyword}":`, data.status_message);
+      }
+
+      // Add small delay between requests to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+    } catch (error) {
+      console.error(`[SERP] Error processing keyword "${keyword}":`, error);
+    }
   }
 
-  return await response.json();
+  console.error(`[SERP] Completed SERP collection. Retrieved ${serpResults.length} results out of ${keywords.slice(0, 50).length} attempted`);
+  
+  return {
+    tasks: serpResults
+  };
 }
 
 // Main analysis function
-async function analyzeWebsite(args: any): Promise<AnalysisReport> {
+async function analyzeWebsite(args: any): Promise<AnalysisReport | any> {
+  console.error(`[DEBUG] Starting analysis for: ${args.websiteUrl}`);
+  console.error(`[DEBUG] Business type: ${args.businessType}`);
+  console.error(`[DEBUG] Args received: ${JSON.stringify(Object.keys(args))}`);
+  
   const { websiteUrl, businessType } = args;
-  const { firecrawlApiKey, perplexityApiKey, dataforSeoUsername, dataforSeoPassword } = getApiCredentials(args);
+  const { firecrawlApiKey, perplexityApiKey, dataforSeoUsername, dataforSeoPassword, debugInfo } = getApiCredentials(args);
+  
+  // Include debug info in response instead of throwing error
+  if (!dataforSeoUsername || !dataforSeoPassword) {
+    return {
+      error: `DataForSEO credentials missing! Username: ${dataforSeoUsername ? 'SET' : 'MISSING'}, Password: ${dataforSeoPassword ? 'SET' : 'MISSING'}`,
+      debugInfo,
+      analysis_summary: {
+        source_website: websiteUrl,
+        business_type: businessType,
+        error: "Missing API credentials"
+      }
+    };
+  }
 
   // Clean URL
   let cleanUrl = websiteUrl;
@@ -279,46 +402,92 @@ async function analyzeWebsite(args: any): Promise<AnalysisReport> {
   }
 
   // Step 1: Scrape website
+  console.error(`[DEBUG] Step 1: Starting website scraping for ${cleanUrl}`);
   const websiteData = await scrapeWebsite(cleanUrl, firecrawlApiKey!);
+  console.error(`[DEBUG] Step 1: Website scraping completed, got ${Object.keys(websiteData).length} data fields`);
   
   // Step 2: Generate keywords
+  console.error(`[DEBUG] Step 2: Starting keyword generation`);
   const seedKeywords = await generateKeywords(cleanUrl, websiteData, businessType, perplexityApiKey!);
+  console.error(`[DEBUG] Step 2: Keyword generation completed, got ${seedKeywords.length} keywords`);
   
   // Step 3: Get keyword data
+  console.error(`[DEBUG] Starting DataForSEO analysis with ${seedKeywords.length} seed keywords`);
+  console.error(`[DEBUG] Seed keywords: ${JSON.stringify(seedKeywords)}`);
+  
   const keywordMetrics = await getKeywordMetrics(seedKeywords, dataforSeoUsername!, dataforSeoPassword!);
   
-  const serpData = await getSerpData(seedKeywords, dataforSeoUsername!, dataforSeoPassword!);
+  const serpData = await getSerpData(seedKeywords, { dataforSeoUsername, dataforSeoPassword });
   
   // Step 4: Process and cluster
   const keywordDB = new Map<string, KeywordData>();
 
   // Process keyword metrics
   const volumeResults = keywordMetrics.tasks?.[0]?.result || [];
-  volumeResults.forEach((item: any) => {
+  console.error(`[DEBUG] Processing ${volumeResults.length} keyword metrics results`);
+  
+  volumeResults.forEach((item: any, index: number) => {
+    console.error(`[DEBUG] Processing keyword ${index + 1}: ${item.keyword} - Volume: ${item.search_volume}, CPC: ${item.cpc}`);
     if (item.keyword && item.search_volume > 0) {
+      const commercialScore = calculateCommercialScore(item, businessType);
+      console.error(`[DEBUG] Commercial score for ${item.keyword}: ${commercialScore} (input: ${JSON.stringify({volume: item.search_volume, cpc: item.cpc, competition: item.competition})})`);
+      
       keywordDB.set(item.keyword, {
         keyword: item.keyword,
         search_volume: item.search_volume,
         cpc: item.cpc || 0,
-        competition: item.competition || 0,
+        competition: convertCompetitionToNumeric(item.competition),
         competition_level: item.competition_level || 'unknown',
         keyword_difficulty: estimateDifficultyFromMetrics(item),
         serp_urls: [],
-        commercial_score: calculateCommercialScore(item, businessType),
+        commercial_score: commercialScore,
         is_seed: true
       });
     }
   });
+  
+  console.error(`[DEBUG] KeywordDB now contains ${keywordDB.size} keywords after processing metrics`);
 
   // Process SERP data
   const serpResults = serpData.tasks || [];
-  serpResults.forEach((task: any) => {
+  console.error(`[DEBUG-SERP] Processing SERP data: ${serpResults.length} tasks received`);
+  
+  serpResults.forEach((task: any, taskIndex: number) => {
+    console.error(`[DEBUG-SERP] Task ${taskIndex + 1}:`, {
+      status: task.status_message,
+      hasResult: !!task.result,
+      resultLength: task.result?.length || 0,
+      hasItems: !!task.result?.[0]?.items,
+      itemsCount: task.result?.[0]?.items?.length || 0,
+      taskData: task.data
+    });
+    
     if (task.result?.[0]?.items) {
       const keyword = task.data?.[0]?.keyword;
       const items = task.result[0].items;
       
+      console.error(`[DEBUG-SERP] Processing keyword: "${keyword}"`);
+      console.error(`[DEBUG-SERP] Keyword exists in DB: ${keywordDB.has(keyword)}`);
+      console.error(`[DEBUG-SERP] Total items: ${items.length}`);
+      
+      // Log all item types to see what we're getting
+      const itemTypes = items.map((item: any) => item.type);
+      console.error(`[DEBUG-SERP] Item types: ${JSON.stringify(itemTypes)}`);
+      
       if (keyword && keywordDB.has(keyword)) {
         const organicResults = items.filter((item: any) => item.type === 'organic' && item.url);
+        console.error(`[DEBUG-SERP] Organic results found: ${organicResults.length}`);
+        
+        if (organicResults.length > 0) {
+          console.error(`[DEBUG-SERP] First organic result:`, {
+            type: organicResults[0].type,
+            url: organicResults[0].url,
+            title: organicResults[0].title,
+            rank_group: organicResults[0].rank_group,
+            rank_absolute: organicResults[0].rank_absolute
+          });
+        }
+        
         const topUrls = organicResults.slice(0, 10).map((item: any) => ({
           url: item.url,
           title: item.title || 'No title',
@@ -326,10 +495,19 @@ async function analyzeWebsite(args: any): Promise<AnalysisReport> {
           position: item.rank_group || item.rank_absolute || 0
         })).filter((item: any) => item.domain);
         
+        console.error(`[DEBUG-SERP] Top URLs after processing: ${topUrls.length}`);
+        console.error(`[DEBUG-SERP] Sample top URL:`, topUrls[0] || 'NONE');
+        
         const keywordData = keywordDB.get(keyword)!;
         keywordData.serp_urls = topUrls;
         keywordData.keyword_difficulty = calculateDifficulty(organicResults) || estimateDifficultyFromMetrics(keywordData);
+        
+        console.error(`[DEBUG-SERP] Updated keyword "${keyword}" with ${topUrls.length} SERP URLs`);
+      } else {
+        console.error(`[DEBUG-SERP] Skipping keyword "${keyword}" - not in keywordDB or keyword is null`);
       }
+    } else {
+      console.error(`[DEBUG-SERP] Task ${taskIndex + 1} has no items - Status: ${task.status_message}`);
     }
   });
 

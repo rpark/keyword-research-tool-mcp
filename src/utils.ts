@@ -85,10 +85,15 @@ export function filterTechnicalKeywords(keywords: string[]): string[] {
 
 // Calculate commercial score
 export function calculateCommercialScore(keywordData: any, businessType: string): number {
+  console.error(`[DEBUG-COMMERCIAL] Function called with:`, JSON.stringify(keywordData));
+  console.error(`[DEBUG-COMMERCIAL] Business type:`, businessType);
+  
   const volume = keywordData.search_volume || 100;
   const cpc = keywordData.cpc || 0.5;
   const competition = keywordData.competition || 0.3;
   const keyword = (keywordData.keyword || '').toLowerCase();
+  
+  console.error(`[DEBUG-COMMERCIAL] Extracted values - Volume: ${volume}, CPC: ${cpc}, Competition: ${competition}, Keyword: ${keyword}`);
   
   let multiplier = 1;
   if (keyword.includes('buy') || keyword.includes('purchase')) multiplier = 2.5;
@@ -96,7 +101,15 @@ export function calculateCommercialScore(keywordData: any, businessType: string)
   else if (keyword.includes('price') || keyword.includes('cost')) multiplier = 1.8;
   else if (keyword.includes('how to')) multiplier = 0.8;
   
-  return Math.max(10, Math.round(volume * Math.max(0.1, cpc) * multiplier * (1 + competition)));
+  console.error(`[DEBUG-COMMERCIAL] Multiplier: ${multiplier}`);
+  
+  const calculation = volume * Math.max(0.1, cpc) * multiplier * (1 + competition);
+  const result = Math.max(10, Math.round(calculation));
+  
+  console.error(`[DEBUG-COMMERCIAL] Calculation: ${volume} * ${Math.max(0.1, cpc)} * ${multiplier} * ${1 + competition} = ${calculation}`);
+  console.error(`[DEBUG-COMMERCIAL] Final result: ${result}`);
+  
+  return result;
 }
 
 // Extract domain from URL
@@ -165,7 +178,7 @@ export function createClusters(keywords: KeywordData[]): KeywordCluster[] {
     clusters.push(cluster);
   });
   
-  return clusters.slice(0, 15);
+  return clusters;
 }
 
 // Identify theme
@@ -251,7 +264,7 @@ export function generateReport(url: string, businessType: string, clusters: Keyw
     summaryCards,
     quickWins,
     highValueTargets,
-    topKeywordClusters: clusters.slice(0, 10),
+    topKeywordClusters: clusters.slice(0, 25),
     mainCompetitors,
     actionPlan,
     rawData: clusters
