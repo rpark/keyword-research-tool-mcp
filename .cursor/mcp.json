@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "seo-keyword-research": {
+      "command": "node",
+      "args": [
+        "/Users/rpark/git/keyword-research-tool-mcp/dist/index.js"
+      ],
+      "env": {
+        "FIRECRAWL_API_KEY": "fc-bd5e77964d2e4232896411fbdfd8e10e",
+        "PERPLEXITY_API_KEY": "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",
+        "DATAFORSEO_USERNAME": "richard@getstingrai.com",
+        "DATAFORSEO_PASSWORD": "f508571039baad12"
+      }
+    }
+  }
+}

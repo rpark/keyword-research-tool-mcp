@@ -24,21 +24,26 @@ export interface KeywordCluster {
   ai_competitors?: string[];
 }
 
+export interface SummaryCard {
+  title: string;
+  value: string;
+  description: string;
+}
+
+export interface ActionStep {
+  title: string;
+  description: string;
+  category: 'Quick Wins' | 'High Value' | 'Content' | 'Competitors';
+}
+
 export interface AnalysisReport {
-  analysis_summary: {
-    source_website: string;
-    business_type: string;
-    analysis_date: string;
-    total_keywords_analyzed: number;
-    clusters_identified: number;
-    total_monthly_search_volume: number;
-    estimated_monthly_traffic_potential: number;
-    avg_cpc: number;
-  };
-  clusters: KeywordCluster[];
-  quick_wins: KeywordCluster[];
-  high_value: KeywordCluster[];
-  competitors: string[];
+  summaryCards: SummaryCard[];
+  quickWins: KeywordCluster[];
+  highValueTargets: KeywordCluster[];
+  topKeywordClusters: KeywordCluster[];
+  mainCompetitors: { domain: string; frequency: number }[];
+  actionPlan: ActionStep[];
+  rawData: KeywordCluster[];
 }
 
 // Content cleaning function
@@ -173,29 +178,82 @@ export function identifyTheme(keyword: string): string {
   return '🎯 General';
 }
 
+// Helper to generate action plan
+function generateActionPlan(clusters: KeywordCluster[], quickWins: KeywordCluster[], highValue: KeywordCluster[], competitors: { domain: string; frequency: number }[]): ActionStep[] {
+    const plan: ActionStep[] = [];
+
+    if (quickWins.length > 0) {
+        plan.push({
+            title: `Target "Quick Win" Keywords`,
+            description: `Focus on creating content for low-competition keywords like "${quickWins[0].main_keyword}" to see faster ranking improvements. These are often easier to rank for and can bring initial traffic.`,
+            category: 'Quick Wins'
+        });
+    }
+
+    if (highValue.length > 0) {
+        plan.push({
+            title: `Pursue High-Value Targets`,
+            description: `Develop in-depth, high-quality content for valuable keywords like "${highValue[0].main_keyword}". These may be more competitive but offer significant returns.`,
+            category: 'High Value'
+        });
+    }
+
+    if (clusters.length > 0) {
+        plan.push({
+            title: `Build Thematic Authority`,
+            description: `Create comprehensive content around your primary keyword clusters, starting with the "${clusters[0].theme}" theme, to establish expertise and improve rankings across a group of related terms.`,
+            category: 'Content'
+        });
+    }
+
+    if (competitors.length > 0) {
+        plan.push({
+            title: `Analyze Top Competitors`,
+            description: `Investigate the content strategies of competitors like ${competitors[0].domain}. Analyze their top-ranking pages for your target keywords to find gaps and opportunities.`,
+            category: 'Competitors'
+        });
+    }
+
+    return plan;
+}
+
 // Generate report
 export function generateReport(url: string, businessType: string, clusters: KeywordCluster[]): AnalysisReport {
   const totalVolume = clusters.reduce((sum, c) => sum + c.total_search_volume, 0);
-  const avgCPC = clusters.reduce((sum, c) => sum + c.avg_cpc, 0) / clusters.length;
+  const totalKeywords = clusters.reduce((sum, c) => sum + c.keywords.length, 0);
+  const avgCPC = clusters.length > 0 ? clusters.reduce((sum, c) => sum + c.avg_cpc, 0) / clusters.length : 0;
+  const avgDifficulty = clusters.length > 0 ? clusters.reduce((sum, c) => sum + c.avg_difficulty, 0) / clusters.length : 0;
+
+  const quickWins = clusters.filter(c => c.avg_difficulty < 40 && c.total_search_volume > 50).sort((a,b) => b.total_commercial_score - a.total_commercial_score).slice(0, 5);
+  const highValueTargets = clusters.filter(c => c.total_commercial_score > 1000 && c.avg_difficulty < 65).sort((a,b) => b.total_commercial_score - a.total_commercial_score).slice(0, 5);
+
+  const allCompetitorDomains = clusters.flatMap(c => c.competitor_domains);
+  const domainCounts = allCompetitorDomains.reduce((acc, domain) => {
+    acc[domain] = (acc[domain] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const mainCompetitors = Object.entries(domainCounts)
+    .map(([domain, frequency]) => ({ domain, frequency }))
+    .sort((a, b) => b.frequency - a.frequency)
+    .slice(0, 10);
+
+  const summaryCards: SummaryCard[] = [
+    { title: 'Total Keywords', value: totalKeywords.toString(), description: 'Total number of relevant keywords analyzed.' },
+    { title: 'Total Search Volume', value: totalVolume.toLocaleString(), description: 'Estimated monthly searches for all keywords.' },
+    { title: 'Average Difficulty', value: `${Math.round(avgDifficulty)}/100`, description: 'Estimated competition for ranking.' },
+    { title: 'Top Competitor', value: mainCompetitors.length > 0 ? mainCompetitors[0].domain : 'N/A', description: 'Most frequently seen competing domain.' }
+  ];
   
-  const allCompetitors = [...new Set(clusters.flatMap(c => 
-    [...c.competitor_domains, ...(c.ai_competitors || [])]
-  ))].filter(d => d);
+  const actionPlan = generateActionPlan(clusters, quickWins, highValueTargets, mainCompetitors);
 
   return {
-    analysis_summary: {
-      source_website: url,
-      business_type: businessType,
-      analysis_date: new Date().toISOString(),
-      total_keywords_analyzed: clusters.reduce((sum, c) => sum + c.keywords.length, 0),
-      clusters_identified: clusters.length,
-      total_monthly_search_volume: totalVolume,
-      estimated_monthly_traffic_potential: Math.round(totalVolume * 0.3),
-      avg_cpc: avgCPC
-    },
-    clusters,
-    quick_wins: clusters.filter(c => c.avg_difficulty < 40).slice(0, 8),
-    high_value: clusters.filter(c => c.total_commercial_score > 1000).slice(0, 8),
-    competitors: allCompetitors.slice(0, 15)
+    summaryCards,
+    quickWins,
+    highValueTargets,
+    topKeywordClusters: clusters.slice(0, 10),
+    mainCompetitors,
+    actionPlan,
+    rawData: clusters
   };
 } 
