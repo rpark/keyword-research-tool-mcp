@@ -70,15 +70,24 @@ function getApiCredentials(args: any) {
   const dataforSeoUsername = args.dataforSeoUsername || process.env.DATAFORSEO_USERNAME;
   const dataforSeoPassword = args.dataforSeoPassword || process.env.DATAFORSEO_PASSWORD;
   
+  // Enhanced logging for Cursor MCP integration
+  const credentialSources = {
+    firecrawl: args.firecrawlApiKey ? 'parameter' : (process.env.FIRECRAWL_API_KEY ? 'environment' : 'missing'),
+    perplexity: args.perplexityApiKey ? 'parameter' : (process.env.PERPLEXITY_API_KEY ? 'environment' : 'missing'),
+    dataforSeoUsername: args.dataforSeoUsername ? 'parameter' : (process.env.DATAFORSEO_USERNAME ? 'environment' : 'missing'),
+    dataforSeoPassword: args.dataforSeoPassword ? 'parameter' : (process.env.DATAFORSEO_PASSWORD ? 'environment' : 'missing')
+  };
+  
   const debugInfo = {
     firecrawl: firecrawlApiKey ? 'PROVIDED' : 'MISSING',
     perplexity: perplexityApiKey ? 'PROVIDED' : 'MISSING',
     dataforSeoUsername: dataforSeoUsername ? `${dataforSeoUsername.substring(0, 3)}***` : 'MISSING',
     dataforSeoPassword: dataforSeoPassword ? '***PROVIDED***' : 'MISSING',
+    sources: credentialSources,
     envVars: Object.keys(process.env).filter(k => k.includes('DATAFORSEO') || k.includes('FIRECRAWL') || k.includes('PERPLEXITY'))
   };
   
-  console.error(`[DEBUG] API Credentials Check: ${JSON.stringify(debugInfo)}`);
+  console.error(`[CURSOR-MCP] API Credentials Check: ${JSON.stringify(debugInfo, null, 2)}`);
   
   return {
     firecrawlApiKey,
@@ -87,6 +96,235 @@ function getApiCredentials(args: any) {
     dataforSeoPassword,
     debugInfo
   };
+}
+
+// Helper function to generate formatted report text
+function generateFormattedReport(report: AnalysisReport, websiteUrl: string, businessType: string): string {
+  const domain = extractDomain(websiteUrl);
+  const totalClusters = report.topKeywordClusters.length;
+  const totalVolume = report.summaryCards.find(card => card.title === 'Total Search Volume')?.value || '0';
+  const avgDifficulty = report.summaryCards.find(card => card.title === 'Average Difficulty')?.value || '0/100';
+  const totalKeywords = report.summaryCards.find(card => card.title === 'Total Keywords')?.value || '0';
+  
+  // Calculate estimated traffic (roughly 30% of search volume)
+  const volumeNum = parseInt(totalVolume.replace(/,/g, '')) || 0;
+  const estimatedTraffic = Math.round(volumeNum * 0.3);
+  
+  // Calculate average CPC
+  const avgCpc = report.topKeywordClusters.length > 0 
+    ? report.topKeywordClusters.reduce((sum, cluster) => sum + cluster.avg_cpc, 0) / report.topKeywordClusters.length 
+    : 0;
+
+  let formattedReport = `🔍 SEO Keyword Research Tool
+Discover high-value keyword opportunities for your website
+
+${totalClusters}
+Keyword Clusters
+${totalVolume}
+Monthly Search Volume
+${estimatedTraffic.toLocaleString()}
+Est. Monthly Traffic
+$${avgCpc.toFixed(2)}
+Average CPC
+
+🚀 Quick Wins (Low Competition)
+`;
+
+  // Add Quick Wins section
+  report.quickWins.forEach(cluster => {
+    const mainKeyword = cluster.keywords[0];
+    formattedReport += `${cluster.main_keyword}
+📊 ${cluster.total_search_volume.toLocaleString()} searches/month
+💰 $${cluster.avg_cpc.toFixed(2)} CPC
+🎯 ${cluster.avg_difficulty}/100 difficulty
+
+`;
+  });
+
+  // Add High-Value Targets section
+  if (report.highValueTargets.length > 0) {
+    formattedReport += `💎 High-Value Targets
+`;
+    report.highValueTargets.forEach(cluster => {
+      formattedReport += `${cluster.main_keyword}
+📊 ${cluster.total_search_volume.toLocaleString()} searches/month
+💰 $${cluster.avg_cpc.toFixed(2)} CPC
+💎 ${cluster.total_commercial_score?.toLocaleString() || 'N/A'} commercial score
+
+`;
+    });
+  }
+
+  // Add Top Keyword Clusters section
+  formattedReport += `📊 Top Keyword Clusters
+`;
+
+  report.topKeywordClusters.slice(0, 10).forEach((cluster, index) => {
+    formattedReport += `${index + 1}. ${cluster.main_keyword}
+${cluster.theme}
+${cluster.total_search_volume.toLocaleString()}
+monthly searches
+$${cluster.avg_cpc.toFixed(2)}
+Avg CPC
+${cluster.avg_difficulty}/100
+Difficulty
+${cluster.keywords.length}
+Keywords
+
+Top Keywords:
+`;
+    
+    // Show top 5 keywords in cluster
+    cluster.keywords.slice(0, 5).forEach(keyword => {
+      formattedReport += `${keyword.keyword}
+${keyword.search_volume.toLocaleString()} searches
+`;
+    });
+
+    formattedReport += `
+Complete Keyword List (${cluster.keywords.length} keywords):
+`;
+    
+    // Show all keywords with details
+    cluster.keywords.forEach(keyword => {
+      formattedReport += `${keyword.keyword}
+Vol: ${keyword.search_volume.toLocaleString()}
+CPC: $${keyword.cpc.toFixed(2)}
+`;
+    });
+    
+    formattedReport += `
+`;
+  });
+
+  // Add Main Competitors section
+  if (report.mainCompetitors.length > 0) {
+    formattedReport += `🏆 Main Competitors
+All Identified Competitors (${report.mainCompetitors.length})
+`;
+    
+    report.mainCompetitors.forEach(competitor => {
+      formattedReport += `🏆
+${competitor.domain}
+`;
+    });
+    formattedReport += `
+`;
+  }
+
+  // Add Action Plan section
+  if (report.actionPlan.length > 0) {
+    formattedReport += `📝 Action Plan
+🚀 Immediate Actions (1-2 weeks)
+`;
+    
+    const immediateActions = report.actionPlan.filter(action => 
+      action.category === 'Quick Wins' || action.title.toLowerCase().includes('quick')
+    );
+    
+    immediateActions.forEach(action => {
+      formattedReport += `✓
+${action.description}
+`;
+    });
+
+    formattedReport += `
+📈 Medium-term Goals (1-3 months)
+◯
+Build comprehensive content for high-value clusters
+◯
+Develop internal linking strategy between related keywords
+◯
+Start building backlinks to target pages
+
+🎯 Long-term Strategy (6-12 months)
+◐
+Build domain authority through high-quality content
+◐
+Target high-difficulty, high-value keywords
+◐
+Expand into related keyword opportunities
+
+`;
+  }
+
+  // Add Analysis Summary
+  formattedReport += `📊 Analysis Summary
+{
+  "source_website": "${websiteUrl}",
+  "business_type": "${businessType}",
+  "analysis_date": "${new Date().toISOString()}",
+  "total_keywords_analyzed": ${totalKeywords},
+  "clusters_identified": ${totalClusters},
+  "total_monthly_search_volume": ${volumeNum},
+  "estimated_monthly_traffic_potential": ${estimatedTraffic},
+  "avg_cpc": ${avgCpc}
+}
+
+🎯 Complete Cluster Analysis (${totalClusters} clusters)
+`;
+
+  report.topKeywordClusters.forEach((cluster, index) => {
+    formattedReport += `${index + 1}. ${cluster.main_keyword} (${cluster.keywords.length} keywords, ${cluster.total_search_volume.toLocaleString()} monthly searches)
+`;
+  });
+
+  formattedReport += `
+✅ Analysis Complete!
+All keyword data, competitor analysis, and detailed metrics are displayed above.
+
+© ${new Date().getFullYear()} SEO Keyword Research Tool. Built with ❤️ for marketers.
+`;
+
+  return formattedReport;
+}
+
+// Helper function to save report to file
+async function saveReportToFile(report: AnalysisReport, websiteUrl: string, businessType: string): Promise<void> {
+  try {
+    // Create reports directory if it doesn't exist
+    const reportsDir = path.join(process.cwd(), 'reports');
+    if (!fs.existsSync(reportsDir)) {
+      fs.mkdirSync(reportsDir, { recursive: true });
+    }
+    
+    // Extract domain name from URL for filename
+    const domain = extractDomain(websiteUrl);
+    const cleanDomain = domain.replace(/[^a-zA-Z0-9.-]/g, '_'); // Clean domain for filename
+    
+    // Create date-stamped filename
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD format
+    const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-'); // HH-MM-SS format
+    const baseFilename = `${cleanDomain}_${businessType.toLowerCase().replace(/\s+/g, '-')}_${dateStr}_${timeStr}`;
+    
+    // Add metadata to the report
+    const reportWithMetadata = {
+      metadata: {
+        generated_at: now.toISOString(),
+        website_url: websiteUrl,
+        business_type: businessType,
+        domain: domain,
+        tool_version: '1.0.0'
+      },
+      ...report
+    };
+    
+    // Save JSON file (for programmatic use)
+    const jsonFilePath = path.join(reportsDir, `${baseFilename}.json`);
+    fs.writeFileSync(jsonFilePath, JSON.stringify(reportWithMetadata, null, 2), 'utf8');
+    
+    // Save formatted text file (for human reading)
+    const formattedReport = generateFormattedReport(report, websiteUrl, businessType);
+    const textFilePath = path.join(reportsDir, `${baseFilename}_formatted.txt`);
+    fs.writeFileSync(textFilePath, formattedReport, 'utf8');
+    
+    console.error(`[REPORT-SAVED] JSON report saved to: ${jsonFilePath}`);
+    console.error(`[REPORT-SAVED] Formatted report saved to: ${textFilePath}`);
+  } catch (error) {
+    console.error(`[REPORT-ERROR] Failed to save report: ${error instanceof Error ? error.message : String(error)}`);
+    // Don't throw error to avoid breaking the analysis - just log it
+  }
 }
 
 // Helper function to convert DataForSEO competition strings to numeric values
@@ -516,7 +754,12 @@ async function analyzeWebsite(args: any): Promise<AnalysisReport | any> {
   const clusters = createClusters(keywordsArray);
   
   // Generate report
-  return generateReport(cleanUrl, businessType, clusters);
+  const report = generateReport(cleanUrl, businessType, clusters);
+  
+  // Save report to reports directory
+  await saveReportToFile(report, cleanUrl, businessType);
+  
+  return report;
 }
 
 // Create and start server
@@ -575,6 +818,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
 
 async function main() {
   try {
+    // Log environment variables on startup for Cursor MCP debugging
+    const startupEnvCheck = {
+      timestamp: new Date().toISOString(),
+      firecrawlKey: process.env.FIRECRAWL_API_KEY ? 'LOADED' : 'MISSING',
+      perplexityKey: process.env.PERPLEXITY_API_KEY ? 'LOADED' : 'MISSING',
+      dataforSeoUsername: process.env.DATAFORSEO_USERNAME ? 'LOADED' : 'MISSING',
+      dataforSeoPassword: process.env.DATAFORSEO_PASSWORD ? 'LOADED' : 'MISSING',
+      nodeVersion: process.version,
+      cwd: process.cwd()
+    };
+    
+    console.error(`[CURSOR-MCP-STARTUP] Environment Check: ${JSON.stringify(startupEnvCheck, null, 2)}`);
     console.error('[DEBUG] Starting MCP server...');
     const transport = new StdioServerTransport();
     

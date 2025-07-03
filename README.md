@@ -58,6 +58,8 @@ Add environment variables to your MCP client configuration:
 }
 ```
 
+If you are running a tool like Cursor or Windsurf, you may need to remind it to search for API keys in the above JSON file.
+
 ### 3. Build the Server
 
 ```bash
