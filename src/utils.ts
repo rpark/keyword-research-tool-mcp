@@ -159,26 +159,79 @@ export function createClusters(keywords: KeywordData[]): KeywordCluster[] {
   const clusters: KeywordCluster[] = [];
   const processed = new Set<string>();
   
-  keywords.sort((a, b) => b.commercial_score - a.commercial_score).forEach(keyword => {
+  // Sort keywords by commercial score for better cluster formation
+  keywords.sort((a, b) => (b.commercial_score || 0) - (a.commercial_score || 0));
+  
+  keywords.forEach(keyword => {
     if (processed.has(keyword.keyword)) return;
+    
+    // Find related keywords for this cluster
+    const relatedKeywords = [keyword];
+    const keywordWords = keyword.keyword.toLowerCase().split(' ');
+    const mainTerm = findMainTerm(keyword.keyword);
+    
+    // Look for similar keywords to group together
+    keywords.forEach(otherKeyword => {
+      if (processed.has(otherKeyword.keyword) || otherKeyword.keyword === keyword.keyword) return;
+      
+      const similarity = calculateKeywordSimilarity(keyword.keyword, otherKeyword.keyword);
+      const hasMainTerm = otherKeyword.keyword.toLowerCase().includes(mainTerm);
+      
+      // Group keywords that are similar or contain the main term
+      if (similarity > 0.3 || hasMainTerm) {
+        relatedKeywords.push(otherKeyword);
+        processed.add(otherKeyword.keyword);
+      }
+    });
+    
+    // Create cluster with all related keywords
+    const totalVolume = relatedKeywords.reduce((sum, kw) => sum + kw.search_volume, 0);
+    const avgCpc = relatedKeywords.reduce((sum, kw) => sum + kw.cpc, 0) / relatedKeywords.length;
+    const avgDifficulty = relatedKeywords.reduce((sum, kw) => sum + kw.keyword_difficulty, 0) / relatedKeywords.length;
+    const totalCommercialScore = relatedKeywords.reduce((sum, kw) => sum + (kw.commercial_score || 0), 0);
+    
+    // Collect competitor domains from all keywords in cluster
+    const allCompetitorDomains = relatedKeywords.flatMap(kw => kw.serp_urls.map(u => u.domain).filter(d => d));
+    const uniqueCompetitors = [...new Set(allCompetitorDomains)];
     
     const cluster: KeywordCluster = {
       cluster_id: clusters.length + 1,
       main_keyword: keyword.keyword,
       theme: identifyTheme(keyword.keyword),
-      keywords: [keyword],
-      total_search_volume: keyword.search_volume,
-      avg_cpc: keyword.cpc,
-      avg_difficulty: keyword.keyword_difficulty,
-      total_commercial_score: keyword.commercial_score,
-      competitor_domains: [...new Set(keyword.serp_urls.map(u => u.domain).filter(d => d))]
+      keywords: relatedKeywords,
+      total_search_volume: totalVolume,
+      avg_cpc: avgCpc,
+      avg_difficulty: avgDifficulty,
+      total_commercial_score: totalCommercialScore,
+      competitor_domains: uniqueCompetitors
     };
     
     processed.add(keyword.keyword);
     clusters.push(cluster);
   });
   
-  return clusters;
+  return clusters.sort((a, b) => b.total_commercial_score - a.total_commercial_score);
+}
+
+// Helper function to find the main term in a keyword
+function findMainTerm(keyword: string): string {
+  const words = keyword.toLowerCase().split(' ');
+  const stopWords = ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'can', 'best', 'top', 'how', 'what', 'when', 'where', 'why'];
+  
+  // Find the longest non-stop word
+  const contentWords = words.filter(word => !stopWords.includes(word) && word.length > 2);
+  return contentWords.sort((a, b) => b.length - a.length)[0] || words[0] || '';
+}
+
+// Helper function to calculate similarity between keywords
+function calculateKeywordSimilarity(keyword1: string, keyword2: string): number {
+  const words1 = new Set(keyword1.toLowerCase().split(' '));
+  const words2 = new Set(keyword2.toLowerCase().split(' '));
+  
+  const intersection = new Set([...words1].filter(x => words2.has(x)));
+  const union = new Set([...words1, ...words2]);
+  
+  return intersection.size / union.size;
 }
 
 // Identify theme
@@ -237,8 +290,22 @@ export function generateReport(url: string, businessType: string, clusters: Keyw
   const avgCPC = clusters.length > 0 ? clusters.reduce((sum, c) => sum + c.avg_cpc, 0) / clusters.length : 0;
   const avgDifficulty = clusters.length > 0 ? clusters.reduce((sum, c) => sum + c.avg_difficulty, 0) / clusters.length : 0;
 
+  // Debug cluster filtering for Quick Wins and High-Value Targets
+  console.error(`[DEBUG-FILTER] Analyzing ${clusters.length} clusters for Quick Wins and High-Value Targets:`);
+  clusters.forEach((cluster, index) => {
+    console.error(`[DEBUG-FILTER] Cluster ${index + 1}: "${cluster.main_keyword}"`);
+    console.error(`[DEBUG-FILTER]   - avg_difficulty: ${cluster.avg_difficulty} (Quick Win threshold: < 40)`);
+    console.error(`[DEBUG-FILTER]   - total_search_volume: ${cluster.total_search_volume} (Quick Win threshold: > 50)`);
+    console.error(`[DEBUG-FILTER]   - total_commercial_score: ${cluster.total_commercial_score} (High Value threshold: > 1000)`);
+    console.error(`[DEBUG-FILTER]   - Keywords count: ${cluster.keywords.length}`);
+    console.error(`[DEBUG-FILTER]   - Sample commercial scores: ${cluster.keywords.slice(0, 3).map(k => `${k.keyword}:${k.commercial_score}`).join(', ')}`);
+  });
+
   const quickWins = clusters.filter(c => c.avg_difficulty < 40 && c.total_search_volume > 50).sort((a,b) => b.total_commercial_score - a.total_commercial_score).slice(0, 5);
+  console.error(`[DEBUG-FILTER] Quick Wins found: ${quickWins.length} clusters`);
+  
   const highValueTargets = clusters.filter(c => c.total_commercial_score > 1000 && c.avg_difficulty < 65).sort((a,b) => b.total_commercial_score - a.total_commercial_score).slice(0, 5);
+  console.error(`[DEBUG-FILTER] High-Value Targets found: ${highValueTargets.length} clusters`);
 
   const allCompetitorDomains = clusters.flatMap(c => c.competitor_domains);
   const domainCounts = allCompetitorDomains.reduce((acc, domain) => {

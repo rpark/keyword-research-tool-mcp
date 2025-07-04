@@ -212,6 +212,25 @@ ${competitor.domain}
 `;
   }
 
+  // Add AI Research Results section
+  if (report.topKeywordClusters.length > 0) {
+    formattedReport += `🤖 AI Research Results
+`;
+    
+    report.topKeywordClusters.slice(0, 8).forEach(cluster => {
+      if (cluster.competitor_domains.length > 0) {
+        formattedReport += `${cluster.main_keyword}
+`;
+        cluster.competitor_domains.slice(0, 8).forEach(domain => {
+          formattedReport += `${domain}
+`;
+        });
+        formattedReport += `
+`;
+      }
+    });
+  }
+
   // Add Action Plan section
   if (report.actionPlan.length > 0) {
     formattedReport += `📝 Action Plan
@@ -447,7 +466,7 @@ async function callPerplexityForKeywords(prompt: string, apiKey: string, busines
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'llama-3.1-sonar-small-128k-online',
+      model: 'sonar-pro',
       messages: [
         { role: 'system', content: `You are an expert SEO strategist specializing in ${businessType} businesses.` },
         { role: 'user', content: prompt }
@@ -469,10 +488,10 @@ async function callPerplexityForKeywords(prompt: string, apiKey: string, busines
   try {
     keywords = JSON.parse(content_text);
   } catch (e) {
-    // Parse from text format
-    const lines = content_text.split('\n');
+    // Parse from text format - handle both line-by-line and comma-separated formats
+    const lines = content_text.split(/[\n,]+/); // Split by both newlines and commas
     keywords = lines
-      .map((line: string) => line.replace(/^[\d\-\*\.\s\[\]"'`]+/, '').replace(/["'\]\[`]/g, '').trim())
+      .map((line: string) => line.replace(/^[\d\-\*\.\s\[\]"'`]+/, '').replace(/["'\]\[`]/g, '').replace(/,+$/, '').trim())
       .filter((kw: string) => kw.length > 3 && kw.length < 100)
       .slice(0, 100); // Increased limit
   }
@@ -666,21 +685,33 @@ async function analyzeWebsite(args: any): Promise<AnalysisReport | any> {
   
   volumeResults.forEach((item: any, index: number) => {
     console.error(`[DEBUG] Processing keyword ${index + 1}: ${item.keyword} - Volume: ${item.search_volume}, CPC: ${item.cpc}`);
+    console.error(`[DEBUG] Raw item data: ${JSON.stringify(item)}`);
     if (item.keyword && item.search_volume > 0) {
-      const commercialScore = calculateCommercialScore(item, businessType);
-      console.error(`[DEBUG] Commercial score for ${item.keyword}: ${commercialScore} (input: ${JSON.stringify({volume: item.search_volume, cpc: item.cpc, competition: item.competition})})`);
+      // Convert competition to numeric BEFORE calculating commercial score
+      const numericCompetition = convertCompetitionToNumeric(item.competition);
+      const itemWithNumericCompetition = { ...item, competition: numericCompetition };
       
-      keywordDB.set(item.keyword, {
+      const commercialScore = calculateCommercialScore(itemWithNumericCompetition, businessType);
+      console.error(`[DEBUG] Commercial score for ${item.keyword}: ${commercialScore} (input: ${JSON.stringify({volume: item.search_volume, cpc: item.cpc, competition: numericCompetition, original_competition: item.competition})})`);
+      
+      const keywordEntry = {
         keyword: item.keyword,
         search_volume: item.search_volume,
         cpc: item.cpc || 0,
-        competition: convertCompetitionToNumeric(item.competition),
+        competition: numericCompetition,
         competition_level: item.competition_level || 'unknown',
         keyword_difficulty: estimateDifficultyFromMetrics(item),
         serp_urls: [],
         commercial_score: commercialScore,
         is_seed: true
-      });
+      };
+      
+      console.error(`[DEBUG] Setting keywordDB entry for "${item.keyword}":`, JSON.stringify(keywordEntry));
+      keywordDB.set(item.keyword, keywordEntry);
+      
+      // Verify the entry was set correctly
+      const retrievedEntry = keywordDB.get(item.keyword);
+      console.error(`[DEBUG] Retrieved entry for "${item.keyword}": commercial_score = ${retrievedEntry?.commercial_score}`);
     }
   });
   
@@ -701,7 +732,7 @@ async function analyzeWebsite(args: any): Promise<AnalysisReport | any> {
     });
     
     if (task.result?.[0]?.items) {
-      const keyword = task.data?.[0]?.keyword;
+      const keyword = task.data?.keyword;
       const items = task.result[0].items;
       
       console.error(`[DEBUG-SERP] Processing keyword: "${keyword}"`);
