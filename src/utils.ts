@@ -50,7 +50,15 @@ export interface AnalysisReport {
 export function cleanWebsiteContent(content: string, businessType: string): string {
   if (!content) return '';
   
-  const technicalTerms = ['json', 'api', 'javascript', 'html', 'css', 'code', 'function', 'github', 'npm'];
+  const technicalTerms = [
+    'json', 'api', 'javascript', 'html', 'css', 'code', 'function', 'variable',
+    'array', 'object', 'string', 'boolean', 'null', 'undefined', 'console',
+    'log', 'error', 'debug', 'github', 'npm', 'node', 'react', 'vue', 'angular',
+    'webpack', 'babel', 'typescript', 'php', 'python', 'java', 'sql', 'database',
+    'server', 'localhost', 'http', 'https', 'url', 'endpoint', 'crud', 'rest',
+    'graphql', 'oauth', 'jwt', 'cookie', 'session', 'cache', 'cdn', 'aws',
+    'docker', 'kubernetes', 'deployment', 'pipeline', 'repository', 'commit'
+  ];
   const sentences = content.split(/[.!?]+/).filter(sentence => {
     const lower = sentence.toLowerCase();
     const techCount = technicalTerms.filter(term => lower.includes(term)).length;
@@ -74,12 +82,56 @@ export function cleanWebsiteContent(content: string, businessType: string): stri
 
 // Filter technical keywords
 export function filterTechnicalKeywords(keywords: string[]): string[] {
-  const techTerms = ['json', 'api', 'javascript', 'html', 'css', 'code', 'github', 'npm', 'react'];
-  return keywords.filter(kw => {
-    const lower = kw.toLowerCase();
-    return !techTerms.some(term => lower.includes(term)) && 
-           !/[{}[\]<>()=+\-*/\\|&^%$#@!~`]/.test(kw) && 
-           kw.length > 2;
+  const technicalTerms = [
+    'json', 'api', 'javascript', 'html', 'css', 'code', 'coding', 'programming',
+    'developer', 'development', 'framework', 'library', 'function', 'variable',
+    'array', 'object', 'string', 'boolean', 'null', 'undefined', 'console',
+    'log', 'error', 'debug', 'github', 'npm', 'node', 'react', 'vue', 'angular',
+    'webpack', 'babel', 'typescript', 'php', 'python', 'java', 'sql', 'database',
+    'server', 'localhost', 'http', 'https', 'url', 'endpoint', 'crud', 'rest',
+    'graphql', 'oauth', 'jwt', 'cookie', 'session', 'cache', 'cdn', 'aws',
+    'docker', 'kubernetes', 'deployment', 'pipeline', 'repository', 'commit',
+    'markdown', 'syntax', 'script', 'tag', 'element', 'attribute', 'dom',
+    'cli', 'terminal', 'command', 'install', 'package', 'module', 'import'
+  ];
+  return keywords.filter(keyword => {
+    const lowerKeyword = keyword.toLowerCase().trim();
+    
+    // Remove keywords that contain technical terms (existing logic)
+    const containsTechTerm = technicalTerms.some(term => 
+        lowerKeyword.includes(term)
+    );
+    
+    // Enhanced code detection - catch more programming patterns
+    const looksLikeCode = /[{}[\]<>()=+\-*/\\|&^%$#@!~`]/.test(keyword) ||
+                         keyword.includes('```') ||
+                         keyword.includes('//') ||
+                         keyword.includes('/*') ||
+                         keyword.startsWith('function') ||
+                         keyword.startsWith('var ') ||
+                         keyword.startsWith('const ') ||
+                         keyword.startsWith('let ') ||
+                         keyword.startsWith('class ') ||
+                         keyword.includes('::') ||
+                         /\b\d+\.\d+\.\d+\b/.test(keyword); // version numbers
+    
+    // Remove very generic or meaningless keywords
+    const genericTerms = ['data', 'information', 'content', 'text', 'format', 'file', 
+                         'system', 'service', 'solution', 'platform', 'tool', 'tools',
+                         'software', 'app', 'application', 'program', 'website', 'site'];
+    const isGeneric = genericTerms.some(term => lowerKeyword === term);
+    
+    // Remove single characters and overly short keywords
+    const tooShort = keyword.length < 3;
+    
+    // Remove keywords that are just numbers or contain mostly numbers
+    const mostlyNumbers = /^\d+$/.test(keyword) || /^\d+[a-zA-Z]{1,2}$/.test(keyword);
+    
+    // Remove common stop words when they appear alone
+    const stopWords = ['the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'];
+    const isStopWord = stopWords.includes(lowerKeyword);
+    
+    return !containsTechTerm && !looksLikeCode && !isGeneric && !tooShort && !mostlyNumbers && !isStopWord;
   });
 }
 
