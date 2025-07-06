@@ -974,7 +974,7 @@ For detailed technical data and further analysis, refer to the JSON report file.
     const now = new Date();
     const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD format
     const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-'); // HH-MM-SS format
-    const baseFilename = `${cleanDomain}_${businessType.toLowerCase().replace(/\s+/g, '-')}_${dateStr}_${timeStr}`;
+    const baseFilename = `${cleanDomain}_${dateStr}_${timeStr}`;
     
     // Add metadata to the report
     const reportWithMetadata = {

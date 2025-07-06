@@ -62,12 +62,26 @@ npm run build
 ```json
 {
   "mcpServers": {
-    "keyword-research-tool": {
+    "seo-keyword-research": {
       "command": "node",
-      "args": ["/path/to/keyword-research-tool-mcp/dist/index.js"]
+      "args": ["path/to/keyword-research-tool-mcp/dist/index.js"],
+      "env": {
+        "FIRECRAWL_API_KEY": "fc-xxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "PERPLEXITY_API_KEY": "pplx-xxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "DATAFORSEO_USERNAME": "your-username",
+        "DATAFORSEO_PASSWORD": "your-password"
+      }
     }
   }
 }
+```
+
+If you are running a tool like Cursor or Windsurf, you may need to remind it to search for API keys in the above JSON file.
+
+### 3. Build the Server
+
+```bash
+npm run build
 ```
 
 ## Usage
@@ -114,7 +128,7 @@ The analysis generates:
 ### Saved Reports
 Timestamped reports are automatically saved to `reports/` directory in two formats:
 
-**JSON Report** (`keyword-research-YYYY-MM-DD_HH-MM-SS.json`):
+**JSON Report** (`<company domain>_YYYY-MM-DD_HH-MM-SS.json`):
 - Complete analysis data for technical use
 - All keyword metrics and search volumes
 - Competitor domains and SERP analysis  
@@ -122,7 +136,7 @@ Timestamped reports are automatically saved to `reports/` directory in two forma
 - Clustering analysis
 - Raw API response data
 
-**Text Report** (`keyword-research-YYYY-MM-DD_HH-MM-SS.txt`):
+**Text Report** (`<company domain>_YYYY-MM-DD_HH-MM-SS_formatted.txt`):
 - Comprehensive formatted report matching the original HTML tool
 - Executive summary with key metrics
 - Quick wins section (low competition opportunities)
