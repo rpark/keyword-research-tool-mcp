@@ -1,0 +1,59 @@
+{
+  "dxt_version": "0.1",
+  "name": "seo-keyword-research",
+  "version": "1.0.0",
+  "description": "Comprehensive SEO keyword research and analysis tool for Claude Desktop, based on https://github.com/boringmarketer/keyword-research-tool",
+  "author": {
+    "name": "Richard Park (based on work by James Dickerson)",
+    "email": "richard@getstingrai.com"
+  },
+  "license": "MIT",
+  "icon": "icon.svg",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "args": [],
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"],
+      "server_name": "seo-keyword-research",
+      "description": "SEO keyword research and analysis",
+      "env": {
+        "FIRECRAWL_API_KEY": "${user_config.firecrawl_api_key}",
+        "PERPLEXITY_API_KEY": "${user_config.perplexity_api_key}",
+        "DATAFORSEO_USERNAME": "${user_config.dataforseo_username}",
+        "DATAFORSEO_PASSWORD": "${user_config.dataforseo_password}"
+      }
+    }
+  },
+  "user_config": {
+    "firecrawl_api_key": {
+      "title": "Firecrawl API Key",
+      "type": "string",
+      "description": "Firecrawl API key for website scraping (format: fc-xxxxxxxxxx)",
+      "required": true,
+      "sensitive": true
+    },
+    "perplexity_api_key": {
+      "title": "Perplexity API Key",
+      "type": "string",
+      "description": "Perplexity API key for AI-powered keyword generation (format: pplx-xxxxxxxxxx)",
+      "required": true,
+      "sensitive": true
+    },
+    "dataforseo_username": {
+      "title": "DataForSEO Username",
+      "type": "string", 
+      "description": "DataForSEO username (your email address)",
+      "required": true,
+      "sensitive": true
+    },
+    "dataforseo_password": {
+      "title": "DataForSEO Password",
+      "type": "string",
+      "description": "DataForSEO password",
+      "required": true,
+      "sensitive": true
+    }
+  }
+} 

@@ -27,6 +27,11 @@
     "typescript": "^5.0.0"
   },
   "files": [
-    "dist"
+    "dist",
+    "manifest.json",
+    "icon.svg",
+    "node_modules",
+    "package.json",
+    "DXT_README.md"
   ]
 }

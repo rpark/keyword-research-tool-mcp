@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -61,13 +59,10 @@ interface AnalysisReport {
   competitors: string[];
 }
 
+// Update the AnalysisArgs interface to only require website_url and business_type
 interface AnalysisArgs {
   website_url: string;
   business_type: string;
-  firecrawl_api_key: string;
-  perplexity_api_key: string;
-  dataforseo_username: string;
-  dataforseo_password: string;
 }
 
 // Complete implementation adapted from app.js
@@ -228,6 +223,35 @@ export class KeywordResearchTool {
       
       return !containsTechTerm && !looksLikeCode && !isGeneric && keyword.length > 2;
     });
+  }
+
+  // Helper to parse JSON from AI responses, with fallbacks
+  extractJsonFromAiResponse(content: string): string[] {
+    // Attempt to find JSON within markdown code blocks
+    const codeBlockMatch = content.match(/```(json)?\s*([\s\S]*?)\s*```/);
+    if (codeBlockMatch && codeBlockMatch[2]) {
+      try {
+        // Try parsing the extracted content as a whole
+        return JSON.parse(codeBlockMatch[2]);
+      } catch (e) {
+        // Fallback to parsing line-by-line if main JSON is malformed
+        const lines = codeBlockMatch[2].split('\n');
+        return lines
+          .map(line => line.replace(/^[\d\-\*\.\s\[\]"'`]+/, '').replace(/["'\]\[`,]*$/g, '').trim())
+          .filter(kw => kw.length > 2);
+      }
+    }
+
+    // If no code block, try parsing the entire content
+    try {
+      return JSON.parse(content);
+    } catch (e) {
+      // Fallback to parsing the entire content line-by-line
+      const lines = content.split('\n');
+      return lines
+        .map(line => line.replace(/^[\d\-\*\.\s\[\]"'`]+/, '').replace(/["'\]\[`,]*$/g, '').trim())
+        .filter(kw => kw.length > 2);
+    }
   }
 
   // Step 2: Generate keywords
@@ -712,29 +736,31 @@ Return ONLY the domain names (like example.com) as a JSON array, no explanations
 
         if (response.ok) {
           const data = await response.json() as any;
-          let content = data.choices[0].message.content.trim();
+          const content = data.choices[0].message.content.trim();
           
-          content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '');
+          const competitors = this.extractJsonFromAiResponse(content);
           
-          try {
-            const competitors = JSON.parse(content);
-            if (Array.isArray(competitors)) {
-              const cleanCompetitors = competitors
-                .map(domain => {
-                  return domain.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0].toLowerCase();
-                })
-                .filter(domain => {
-                  return domain && 
-                         domain.includes('.') && 
-                         !domain.includes(' ') &&
-                         domain.length > 3 &&
-                         domain.length < 50;
-                })
-                .slice(0, 8);
-              
-              cluster.ai_competitors = cleanCompetitors;
-            }
-          } catch (parseError) {
+          if (Array.isArray(competitors) && competitors.length > 0) {
+            // Clean and filter the competitors
+            const cleanCompetitors = competitors
+              .map(domain => {
+                // Clean domain format
+                return domain.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0].toLowerCase();
+              })
+              .filter(domain => {
+                // Filter out invalid domains
+                return domain && 
+                       domain.includes('.') && 
+                       !domain.includes(' ') &&
+                       domain.length > 3 &&
+                       domain.length < 50;
+              })
+              .slice(0, 8);
+            
+            cluster.ai_competitors = cleanCompetitors;
+            // Debug: Found AI competitors for cluster
+          } else {
+            // Debug: Failed to parse AI competitor response
             cluster.ai_competitors = [];
           }
         }
@@ -955,51 +981,57 @@ For detailed technical data and further analysis, refer to the JSON report file.
     };
   }
 
-  async saveReportToFile(report: AnalysisReport, websiteUrl: string, businessType: string): Promise<{ jsonFilePath: string, textFilePath: string, textReport: string }> {
-    // Create reports directory if it doesn't exist
-    const reportsDir = path.join(process.cwd(), 'reports');
-    console.log(`[MCP] Current working directory: ${process.cwd()}`);
-    console.log(`[MCP] Reports directory: ${reportsDir}`);
-    
-    if (!fs.existsSync(reportsDir)) {
-      fs.mkdirSync(reportsDir, { recursive: true });
-      console.log(`[MCP] Created reports directory at: ${reportsDir}`);
-    }
-    
-    // Extract domain name from URL for filename
-    const domain = this.extractDomain(websiteUrl);
-    const cleanDomain = domain.replace(/[^a-zA-Z0-9.-]/g, '_'); // Clean domain for filename
-    
-    // Create date-stamped filename
-    const now = new Date();
-    const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD format
-    const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-'); // HH-MM-SS format
-    const baseFilename = `${cleanDomain}_${dateStr}_${timeStr}`;
-    
-    // Add metadata to the report
-    const reportWithMetadata = {
-      metadata: {
-        generated_at: now.toISOString(),
-        website_url: websiteUrl,
-        business_type: businessType,
-        domain: domain,
-        tool_version: '1.0.0'
-      },
-      ...report
-    };
-    
-    // Save JSON file (for programmatic use)
-    const jsonFilePath = path.join(reportsDir, `${baseFilename}.json`);
-    console.log(`[MCP] Saving JSON report to: ${jsonFilePath}`);
-    fs.writeFileSync(jsonFilePath, JSON.stringify(reportWithMetadata, null, 2), 'utf8');
-    
-    // Save formatted text file (for human reading)
+  async saveReportToFile(report: AnalysisReport, websiteUrl: string, businessType: string): Promise<{ jsonFilePath: string | null, textFilePath: string | null, textReport: string, saveError?: string }> {
     const textReport = this.generateTextReport(report);
-    const textFilePath = path.join(reportsDir, `${baseFilename}_formatted.txt`);
-    console.log(`[MCP] Saving text report to: ${textFilePath}`);
-    fs.writeFileSync(textFilePath, textReport, 'utf8');
+    
+    try {
+      // Create reports directory if it doesn't exist
+      const reportsDir = path.join(process.cwd(), 'reports');
+      
+      if (!fs.existsSync(reportsDir)) {
+        fs.mkdirSync(reportsDir, { recursive: true });
+      }
+      
+      // Extract domain name from URL for filename
+      const domain = this.extractDomain(websiteUrl);
+      const cleanDomain = domain.replace(/[^a-zA-Z0-9.-]/g, '_'); // Clean domain for filename
+      
+      // Create date-stamped filename
+      const now = new Date();
+      const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD format
+      const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-'); // HH-MM-SS format
+      const baseFilename = `${cleanDomain}_${dateStr}_${timeStr}`;
+      
+      // Add metadata to the report
+      const reportWithMetadata = {
+        metadata: {
+          generated_at: now.toISOString(),
+          website_url: websiteUrl,
+          business_type: businessType,
+          domain: domain,
+          tool_version: '1.0.0'
+        },
+        ...report
+      };
+      
+      // Save JSON file (for programmatic use)
+      const jsonFilePath = path.join(reportsDir, `${baseFilename}.json`);
+      fs.writeFileSync(jsonFilePath, JSON.stringify(reportWithMetadata, null, 2), 'utf8');
+      
+      // Save formatted text file (for human reading)
+      const textFilePath = path.join(reportsDir, `${baseFilename}_formatted.txt`);
+      fs.writeFileSync(textFilePath, textReport, 'utf8');
 
-    return { jsonFilePath, textFilePath, textReport };
+      return { jsonFilePath, textFilePath, textReport };
+    } catch (error) {
+      // Failed to save files - continue without saving
+      return { 
+        jsonFilePath: null, 
+        textFilePath: null, 
+        textReport,
+        saveError: error instanceof Error ? error.message : String(error)
+      };
+    }
   }
 
   async performAnalysis(
@@ -1080,30 +1112,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               enum: ['E-commerce', 'SaaS', 'Service Business', 'Blog/Content', 'Education', 'Other'],
               description: 'The type of business for targeted keyword analysis',
             },
-            firecrawl_api_key: {
-              type: 'string',
-              description: 'Firecrawl API key for website scraping (format: fc-xxxxxxxxxx)',
-            },
-            perplexity_api_key: {
-              type: 'string',
-              description: 'Perplexity API key for AI-powered keyword generation (format: pplx-xxxxxxxxxx)',
-            },
-            dataforseo_username: {
-              type: 'string',
-              description: 'DataForSEO username (your email)',
-            },
-            dataforseo_password: {
-              type: 'string',
-              description: 'DataForSEO password',
-            },
           },
           required: [
             'website_url',
             'business_type',
-            'firecrawl_api_key',
-            'perplexity_api_key',
-            'dataforseo_username',
-            'dataforseo_password',
           ],
         },
       } as Tool,
@@ -1120,15 +1132,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const {
         website_url,
         business_type,
-        firecrawl_api_key,
-        perplexity_api_key,
-        dataforseo_username,
-        dataforseo_password,
       } = args as unknown as AnalysisArgs;
 
-      if (!website_url || !business_type || !firecrawl_api_key || 
-          !perplexity_api_key || !dataforseo_username || !dataforseo_password) {
-        throw new Error('All parameters are required for keyword analysis.');
+      // Read API keys from environment variables (set by DXT runtime)
+      const firecrawl_api_key = process.env.FIRECRAWL_API_KEY;
+      const perplexity_api_key = process.env.PERPLEXITY_API_KEY;
+      const dataforseo_username = process.env.DATAFORSEO_USERNAME;
+      const dataforseo_password = process.env.DATAFORSEO_PASSWORD;
+
+      // Validate all required parameters and environment variables
+      if (!website_url || !business_type) {
+        throw new Error('website_url and business_type are required parameters.');
+      }
+
+      if (!firecrawl_api_key || !perplexity_api_key || !dataforseo_username || !dataforseo_password) {
+        throw new Error('API keys are not configured. Please ensure all required API keys are set in the extension configuration: FIRECRAWL_API_KEY, PERPLEXITY_API_KEY, DATAFORSEO_USERNAME, and DATAFORSEO_PASSWORD.');
       }
 
       const report = await keywordTool.performAnalysis(
@@ -1140,21 +1158,150 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         dataforseo_password
       );
 
-      const { jsonFilePath, textFilePath, textReport } = await keywordTool.saveReportToFile(
+      const { jsonFilePath, textFilePath, textReport, saveError } = await keywordTool.saveReportToFile(
         report, 
         website_url, 
         business_type
       );
 
+      // Create a comprehensive response with all analysis data
+      const responseData = {
+        success: true,
+        analysis_completed: true,
+        metadata: {
+          website_url: website_url,
+          business_type: business_type,
+          analysis_date: report.analysis_summary.analysis_date,
+          tool_version: "1.0.0"
+        },
+        analysis_summary: {
+          source_website: report.analysis_summary.source_website,
+          business_type: report.analysis_summary.business_type,
+          analysis_date: report.analysis_summary.analysis_date,
+          total_keywords_analyzed: report.analysis_summary.total_keywords_analyzed,
+          clusters_identified: report.analysis_summary.clusters_identified,
+          total_monthly_search_volume: report.analysis_summary.total_monthly_search_volume,
+          estimated_monthly_traffic_potential: report.analysis_summary.estimated_monthly_traffic_potential,
+          average_cpc: Number(report.analysis_summary.avg_cpc.toFixed(2))
+        },
+        quick_wins: report.quick_wins.map(cluster => ({
+          cluster_id: cluster.cluster_id,
+          main_keyword: cluster.main_keyword,
+          theme: cluster.theme,
+          total_search_volume: cluster.total_search_volume,
+          avg_cpc: Number(cluster.avg_cpc.toFixed(2)),
+          avg_difficulty: Math.round(cluster.avg_difficulty),
+          total_commercial_score: cluster.total_commercial_score,
+          keywords_count: cluster.keywords.length,
+          top_keywords: cluster.keywords.slice(0, 5).map(kw => ({
+            keyword: kw.keyword,
+            search_volume: kw.search_volume,
+            cpc: Number(kw.cpc.toFixed(2)),
+            difficulty: Math.round(kw.keyword_difficulty)
+          })),
+          competitor_domains: cluster.competitor_domains,
+          ai_competitors: cluster.ai_competitors || []
+        })),
+        high_value_opportunities: report.high_value.map(cluster => ({
+          cluster_id: cluster.cluster_id,
+          main_keyword: cluster.main_keyword,
+          theme: cluster.theme,
+          total_search_volume: cluster.total_search_volume,
+          avg_cpc: Number(cluster.avg_cpc.toFixed(2)),
+          avg_difficulty: Math.round(cluster.avg_difficulty),
+          total_commercial_score: cluster.total_commercial_score,
+          keywords_count: cluster.keywords.length,
+          top_keywords: cluster.keywords.slice(0, 5).map(kw => ({
+            keyword: kw.keyword,
+            search_volume: kw.search_volume,
+            cpc: Number(kw.cpc.toFixed(2)),
+            commercial_score: kw.commercial_score
+          })),
+          competitor_domains: cluster.competitor_domains,
+          ai_competitors: cluster.ai_competitors || []
+        })),
+        keyword_clusters: report.clusters.map(cluster => ({
+          cluster_id: cluster.cluster_id,
+          main_keyword: cluster.main_keyword,
+          theme: cluster.theme,
+          total_search_volume: cluster.total_search_volume,
+          avg_cpc: Number(cluster.avg_cpc.toFixed(2)),
+          avg_difficulty: Math.round(cluster.avg_difficulty),
+          total_commercial_score: cluster.total_commercial_score,
+          keywords_count: cluster.keywords.length,
+          keywords: cluster.keywords.map(kw => ({
+            keyword: kw.keyword,
+            search_volume: kw.search_volume,
+            cpc: Number(kw.cpc.toFixed(2)),
+            competition: Number((kw.competition * 100).toFixed(0)),
+            competition_level: kw.competition_level,
+            keyword_difficulty: Math.round(kw.keyword_difficulty),
+            commercial_score: kw.commercial_score,
+            is_seed: kw.is_seed,
+            serp_urls: kw.serp_urls.map(url => ({
+              url: url.url,
+              title: url.title,
+              domain: url.domain,
+              position: url.position
+            }))
+          })),
+          competitor_domains: cluster.competitor_domains,
+          ai_competitors: cluster.ai_competitors || []
+        })),
+        competitors: {
+          all_competitors: report.competitors,
+          total_count: report.competitors.length,
+          serp_competitors: [...new Set(report.clusters.flatMap(c => c.competitor_domains))].filter(d => d && d.length > 0),
+          ai_competitors: [...new Set(report.clusters.flatMap(c => c.ai_competitors || []))].filter(d => d && d.length > 0),
+          by_cluster: report.clusters.map(cluster => ({
+            cluster: cluster.main_keyword,
+            serp_competitors: cluster.competitor_domains,
+            ai_competitors: cluster.ai_competitors || []
+          })).filter(c => c.serp_competitors.length > 0 || c.ai_competitors.length > 0)
+        },
+        action_plan: {
+          immediate_actions: [
+            "Target quick win keywords with low competition (difficulty < 40)",
+            "Create targeted landing pages for main keyword clusters",
+            "Analyze competitor content strategies for top domains",
+            "Optimize existing pages for high-volume, low-competition keywords",
+            "Set up keyword tracking for priority clusters"
+          ],
+          medium_term_goals: [
+            "Build comprehensive content for high-value clusters",
+            "Develop internal linking strategy between related keywords",
+            "Start building backlinks to target pages",
+            "Create content hubs around main themes",
+            "Implement schema markup for better SERP visibility"
+          ],
+          long_term_strategy: [
+            "Build domain authority through high-quality content",
+            "Target high-difficulty, high-value keywords",
+            "Expand into related keyword opportunities",
+            "Develop comprehensive competitor analysis and positioning",
+            "Scale content production for semantic keyword coverage"
+          ]
+        },
+        performance_metrics: {
+          quick_wins_available: report.quick_wins.length,
+          high_value_opportunities: report.high_value.length,
+          total_potential_traffic: report.analysis_summary.estimated_monthly_traffic_potential,
+          average_cpc_across_all: Number(report.analysis_summary.avg_cpc.toFixed(2)),
+          total_commercial_value: report.clusters.reduce((sum, c) => sum + c.total_commercial_score, 0)
+        },
+        files: {
+          json_report_path: jsonFilePath || null,
+          text_report_path: textFilePath || null,
+          files_saved: !!(jsonFilePath && textFilePath),
+          save_error: saveError || null
+        }
+      };
+
       return {
         content: [
           {
             type: 'text',
-            text: `${textReport}
-
-📁 REPORT FILES SAVED:
-- JSON Report: ${jsonFilePath}
-- Text Report: ${textFilePath}`,
+            text: JSON.stringify(responseData, null, 2),
           },
         ],
       };
